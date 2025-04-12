@@ -4,6 +4,7 @@ from firebase_admin import credentials, auth, firestore
 import requests
 import os
 from dotenv import load_dotenv
+from flask_cors import CORS
 
 # Load .env variables
 load_dotenv()
@@ -32,6 +33,7 @@ db = firestore.client()
 print("Connected to Firestore")
 
 app = Flask(__name__)
+CORS(app)
 
 @app.route('/user/register', methods=['POST'])
 def register():
