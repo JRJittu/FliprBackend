@@ -5,14 +5,12 @@ import requests
 import os
 from dotenv import load_dotenv
 from flask_cors import CORS
+from datetime import datetime
+from openai import OpenAI
 
-# Load .env variables
-load_dotenv()
-
-# Get API Key
+load_dotenv()  
 FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY")
 
-# Service account dictionary
 firebase_creds = {
     "type": os.getenv("GCP_TYPE"),
     "project_id": os.getenv("GCP_PROJECT_ID"),
@@ -35,6 +33,37 @@ print("Connected to Firestore")
 app = Flask(__name__)
 CORS(app)
 
+# Set up OpenAI Groq client
+client = OpenAI(
+    base_url="https://api.groq.com/openai/v1",
+    api_key=os.getenv("GROQ_API_KEY")
+)
+
+# Chat history initialized with system prompt
+chat_history = [
+    {
+        "role": "system",
+        "content": """
+You are a financial assistant. For each user message, extract the following structured data:
+- amount
+- category (only if it's expenditure, choose from: food, entertainment, shopping, travel, bills, daily utilities)
+- description
+- type: income or expenditure
+- source (only if it's income, otherwise null)
+
+Return the data in this exact JSON format:
+{
+  "amount": "<amount>",
+  "category": "<category or null>",
+  "description": "<description>",
+  "type": "<income or expenditure>",
+  "source": "<source or null>"
+}
+"""
+    }
+]
+
+
 @app.route('/user/register', methods=['POST'])
 def register():
     try:
@@ -49,7 +78,8 @@ def register():
         # Store additional user data in Firestore
         db.collection("users").document(user.uid).set({
             "email": email,
-            "name": name
+            "name": name,
+            "balance": 10000,
         })
 
         return jsonify({"message": "User registered", "uid": user.uid}), 200
@@ -91,6 +121,155 @@ def login():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+
+@app.route('/user/<uid>/add-goal', methods=['POST'])
+def add_goal(uid):
+    try:
+        print("called add goal")
+        data = request.json
+        goal_name = data['goal_name']
+        description = data['description']
+        target_amount = data['target_amount']
+        created_date = datetime.utcnow().isoformat()   # current UTC date
+
+        # Goal dictionary
+        goal_data = {
+            "goal_name": goal_name,
+            "target_amount": target_amount,
+            "description": description,
+            "current_saving": 0,
+            "completed": False,
+            "created_date": created_date,
+            "difficulty": "medium",
+            "deadline_date": None
+        }
+
+        # Save to Firestore under subcollection
+        db.collection("users").document(uid).collection("goals").add(goal_data)
+
+        return jsonify({"message": "Goal added successfully"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route('/user/<uid>/add-expense', methods=['POST'])
+def add_expense(uid):
+    try:
+        data = request.json
+        record_type = data['type']  # 'income' or 'expenditure'
+        entry = data['entry']       # dictionary like {amount: 100, reason: "...", category: "..."}
+
+        amount = entry['amount']
+        now = datetime.utcnow()
+        key = f"{now.month:02d}-{now.year}_{record_type}"  # e.g., 04-2025_income
+
+        # Reference to user document
+        user_ref = db.collection("users").document(uid)
+        user_doc = user_ref.get()
+
+        if not user_doc.exists:
+            return jsonify({"error": "User not found"}), 404
+
+        user_data = user_doc.to_dict()
+        balance = user_data.get("balance", 0)
+
+        # Update balance
+        if record_type == "expenditure":
+            balance -= amount
+        elif record_type == "income":
+            balance += amount
+
+        # Update monthly entry
+        existing_data = user_data.get(key, [])
+        updated_data = existing_data + [entry]
+
+        # Save updates to Firestore
+        user_ref.update({
+            key: updated_data,
+            "balance": balance
+        })
+
+        return jsonify({"message": f"{record_type.capitalize()} added to {key}", "updated_balance": balance}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+
+@app.route('/user/<uid>', methods=['GET'])
+def get_user(uid):
+    try:
+        doc = db.collection("users").document(uid).get()
+        if doc.exists:
+            return jsonify(doc.to_dict()), 200
+        else:
+            return jsonify({"error": "User not found"}), 404
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route('/user/<uid>/goals', methods=['GET'])
+def get_goals(uid):
+    try:
+        goals_ref = db.collection("users").document(uid).collection("goals").stream()
+        goals = [{**doc.to_dict(), "id": doc.id} for doc in goals_ref]
+        return jsonify(goals), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route('/user/<uid>/goals/<goal_name>', methods=['GET'])
+def get_specific_goal(uid, goal_name):
+    try:
+        goals_ref = db.collection("users").document(uid).collection("goals")
+        query = goals_ref.where("goal_name", "==", goal_name).stream()
+        goal_list = [doc.to_dict() for doc in query]
+        
+        if not goal_list:
+            return jsonify({"error": "Goal not found"}), 404
+
+        return jsonify(goal_list[0]), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/gpt/chat", methods=["POST"])
+def chat():
+    user_message = request.json.get("message")
+
+    # Add user message to the chat history
+    chat_history.append({"role": "user", "content": user_message})
+
+    # Generate model response using Groq
+    response = client.chat.completions.create(
+        model="llama3-8b-8192",
+        messages=chat_history
+    )
+
+    assistant_reply = response.choices[0].message.content
+
+    # Add assistant's reply to chat history
+    chat_history.append({"role": "assistant", "content": assistant_reply})
+    # Return the reply
+    return jsonify({"reply": assistant_reply})
+
+@app.route('/user/<uid>/balance', methods=['GET'])
+def get_balance(uid):
+    try:
+        user_ref = db.collection("users").document(uid)
+        user_doc = user_ref.get()
+        if not user_doc.exists:
+            return jsonify({"error": "User not found"}), 404
+        balance = user_doc.to_dict().get("balance", 0)
+        return jsonify({"balance": balance}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
 
 
 if __name__ == '__main__':
