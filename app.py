@@ -51,7 +51,7 @@ You are a financial assistant. For each user message, extract the following stru
 - type: income or expenditure
 - source (only if it's income, otherwise null)
 
-Return the data in this exact JSON format:
+Return the data in this exact JSON format, dont give any messages along with that:
 {
   "amount": "<amount>",
   "category": "<category or null>",
