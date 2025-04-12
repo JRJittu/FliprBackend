@@ -326,6 +326,32 @@ def gpt_chat():
     return jsonify({"reply": assistant_reply})
 
 
+@app.route('/user/<uid>/transactions', methods=['GET'])
+def get_user_transactions(uid):
+    try:
+        trans_type = request.args.get('type')  # "income" or "expenditure"
+        month_year = request.args.get('month_year')  # e.g. "04-2025"
+
+        if trans_type not in ['income', 'expenditure']:
+            return jsonify({'error': 'Invalid type. Must be "income" or "expenditure".'}), 400
+        if not month_year:
+            return jsonify({'error': 'month_year parameter is required (e.g., 04-2025).'}), 400
+
+        user_doc = db.collection("users").document(uid).get()
+        if not user_doc.exists:
+            return jsonify({'error': 'User not found'}), 404
+
+        user_data = user_doc.to_dict()
+        key = f"{month_year}_{trans_type}"
+        transactions = user_data.get(key, [])
+
+        return jsonify(transactions), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+
 if __name__ == '__main__':
     print("Running server")
     app.run(debug=True)
