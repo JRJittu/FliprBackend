@@ -153,6 +153,7 @@ def add_goal(uid):
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
+
 @app.route('/user/<uid>/add-expense', methods=['POST'])
 def add_expense(uid):
     try:
@@ -237,8 +238,8 @@ def get_specific_goal(uid, goal_name):
         return jsonify({"error": str(e)}), 400
 
 
-@app.route("/gpt/chat", methods=["POST"])
-def chat():
+@app.route("/gpt/expense-details", methods=["POST"])
+def gpt_expenseDetails():
     user_message = request.json.get("message")
 
     # Add user message to the chat history
@@ -256,6 +257,7 @@ def chat():
     chat_history.append({"role": "assistant", "content": assistant_reply})
     # Return the reply
     return jsonify({"reply": assistant_reply})
+
 
 @app.route('/user/<uid>/balance', methods=['GET'])
 def get_balance(uid):
@@ -299,6 +301,29 @@ def get_sorted_user_goals(uid):
         return jsonify({"error": str(e)}), 400
 
 
+chat_history2 = [
+    {
+        "role": "system",
+        "content": "You are a helpful financial budgeting assistant. Keep your answers short, clear, and to the point—preferably 1–2 sentences."
+    }
+]
+
+@app.route("/gpt/chat", methods=["POST"])
+def gpt_chat():
+    user_message = request.json.get("message")
+    
+    chat_history2.append({"role": "user", "content": user_message})
+
+    response = client.chat.completions.create(
+        model="llama3-8b-8192",
+        messages=chat_history2
+    )
+
+    assistant_reply = response.choices[0].message.content
+
+    chat_history2.append({"role": "assistant", "content": assistant_reply})
+
+    return jsonify({"reply": assistant_reply})
 
 
 if __name__ == '__main__':
