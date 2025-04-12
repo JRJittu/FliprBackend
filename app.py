@@ -161,7 +161,7 @@ def add_expense(uid):
         record_type = data['type']  # 'income' or 'expenditure'
         entry = data['entry']       # dictionary like {amount: 100, reason: "...", category: "..."}
 
-        amount = entry['amount']
+        amount = float(entry['amount'])
         now = datetime.utcnow()
         key = f"{now.month:02d}-{now.year}_{record_type}"  # e.g., 04-2025_income
 
