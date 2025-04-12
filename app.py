@@ -271,6 +271,35 @@ def get_balance(uid):
         return jsonify({"error": str(e)}), 400
 
 
+@app.route('/top-goal/<uid>', methods=['GET'])
+def get_sorted_user_goals(uid):
+    try:
+        goals_ref = db.collection("users").document(uid).collection("goals").stream()
+        user_goals = [doc.to_dict() for doc in goals_ref]
+
+        # Filter only uncompleted goals
+        uncompleted_goals = [g for g in user_goals if not g.get("completed", False)]
+
+        # Sort by difficulty (hard > medium > easy), then by target_amount descending
+        difficulty_order = {"hard": 0, "medium": 1, "easy": 2}
+        uncompleted_goals.sort(
+            key=lambda g: (
+                difficulty_order.get(g.get("difficulty", "medium"), 1),
+                -float(g.get("target_amount", 0))  # Safely cast to float
+            )
+        )
+
+        # Return only the top goal, if available
+        if uncompleted_goals:
+            return jsonify(uncompleted_goals[0]), 200
+        else:
+            return jsonify({"message": "No uncompleted goals found"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+
 
 if __name__ == '__main__':
     print("Running server")
